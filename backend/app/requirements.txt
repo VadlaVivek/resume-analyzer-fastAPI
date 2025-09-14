@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+pdfplumber
+python-multipart
+pydantic
+requests
+langchain   # optional if you plan to use LangChain
+openai      # optional if using OpenAI API
