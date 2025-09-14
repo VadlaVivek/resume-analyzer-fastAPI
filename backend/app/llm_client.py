@@ -5,9 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # set this in .env or environment
-
-# ---------- Utility helpers ----------
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  
 
 def debug_print(*args, **kwargs):
     print(*args, **kwargs, flush=True)
@@ -21,21 +19,19 @@ def quick_phone(text):
     return m.group(0).strip() if m else None
 
 def quick_name_from_text(text):
-    # heuristic: first non-empty line without an email/address is name candidate
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for ln in lines[:5]:
         if '@' not in ln and len(ln.split()) <= 4 and not re.search(r'\d', ln):
             return ln
     return None
 
-# ---------- LLM call wrapper (optional, may fail if SDK not installed) ----------
 def call_gemini(prompt: str) -> str:
     """
     Call Gemini via google.generativeai if available.
     If the SDK/import fails, this raises and will trigger fallback to heuristics.
     """
     try:
-        import google.generativeai as genai  # dynamic import so file runs without SDK too
+        import google.generativeai as genai  
     except Exception as e:
         raise RuntimeError(f"Gemini SDK not available: {e}")
 
@@ -43,20 +39,15 @@ def call_gemini(prompt: str) -> str:
         raise RuntimeError("GEMINI_API_KEY not set in environment")
 
     genai.configure(api_key=GEMINI_API_KEY)
-    # using text model:
     model = genai.GenerativeModel("gemini-pro")
     resp = model.generate_content(prompt)
-    # response can be an object - most libs expose text property
     if hasattr(resp, "text"):
         return resp.text
-    # else return string representation
     return str(resp)
 
-# ---------- Cleaning / parsing helpers ----------
 
 def remove_markdown_fences(text: str) -> str:
     text = text.strip()
-    # remove triple-backtick blocks that may surround JSON
     text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s*```$', '', text)
     return text.strip()
@@ -69,68 +60,55 @@ def force_brace_wrap(text: str) -> str:
     t = text.strip()
     t = remove_markdown_fences(t)
 
-    # If text contains a JSON object already, extract it
     if '{' in t and '}' in t:
         start = t.find('{')
         end = t.rfind('}') + 1
         candidate = t[start:end]
         return candidate.strip()
 
-    # If text begins with something like '"name":' or 'name:' or '\n  "name"'
     if re.match(r'^[\s\n]*["\']?\w+["\']?\s*:', t):
-        # wrap with braces
         t_wrapped = '{' + t + '}'
         return t_wrapped
 
-    # otherwise return original (cleaned) text
     return t
 
 def try_json_loads(text: str):
     """
     Try several strategies to parse text into JSON. Returns dict or raises.
     """
-    # 1) Try raw load
     try:
         return json.loads(text)
     except Exception:
         pass
 
-    # 2) remove fences and try again
     cleaned = remove_markdown_fences(text)
     try:
         return json.loads(cleaned)
     except Exception:
         pass
 
-    # 3) if missing braces, force wrap and try
     forced = force_brace_wrap(text)
     try:
         return json.loads(forced)
     except Exception:
         pass
 
-    # 4) Last-ditch attempt: find all quoted "key": value pairs and build dict
-    # We'll look for known keys we expect and extract simple values/arrays
     keys = ["name", "email", "phone", "core_skills", "soft_skills", "work_experience", "education", "summary"]
     result = {}
     for k in keys:
-        # look for "key": <value>
         m = re.search(rf'"?{k}"?\s*:\s*(\[[^\]]*\]|\{{[^\}}]*\}}|"(?:[^"\\]|\\.)*"|[^\n,]+)', text, flags=re.IGNORECASE)
         if m:
             val = m.group(1).strip()
-            # try parse arrays/objects
             if val.startswith('[') or val.startswith('{'):
                 try:
                     result[k] = json.loads(val)
                 except Exception:
-                    # crude split for arrays like: [skill1, skill2]
                     items = re.findall(r'["\']([^"\']+)["\']|([^,\[\]]+)', val)
                     arr = []
                     for a,b in items:
                         arr.append((a or b).strip())
                     result[k] = [x for x in arr if x]
             else:
-                # strip surrounding quotes
                 if val.startswith('"') and val.endswith('"'):
                     result[k] = val[1:-1]
                 else:
@@ -138,10 +116,8 @@ def try_json_loads(text: str):
     if result:
         return result
 
-    # If nothing worked, raise
     raise ValueError("Could not parse JSON from LLM output")
 
-# ---------- Heuristic extractor (fallback from resume text) ----------
 
 def heuristic_extract_from_resume_text(resume_text: str) -> dict:
     """
@@ -153,16 +129,13 @@ def heuristic_extract_from_resume_text(resume_text: str) -> dict:
     email = quick_email(rt)
     phone = quick_phone(rt)
 
-    # Skills: look for lines that include skill keywords
     core_skills = []
     m = re.search(r'(core skills|technical skills|skills)[:\-\n]+([^\n\r]+)', rt, flags=re.IGNORECASE)
     if m:
         skills_line = m.group(2)
-        # split on commas or bullets
         parts = re.split(r'[,\u2022\-\n]+', skills_line)
         core_skills = [p.strip() for p in parts if p.strip()]
 
-    # If not found, try to collect common tech keywords
     if not core_skills:
         tech_patterns = ["Python","JavaScript","React","Node","Django","Flask","SQL","Postgres","Mongo","AWS","Docker","Kubernetes","Java","C++","TypeScript"]
         found = []
@@ -171,15 +144,13 @@ def heuristic_extract_from_resume_text(resume_text: str) -> dict:
                 found.append(pat)
         core_skills = found
 
-    # Experience: try to capture bulleted lines under Experience
     work_experience = []
     mexp = re.search(r'(experience|work experience|professional experience)[:\n\r]+(.+?)(?:\n\n|\neducation|\n$)', rt, flags=re.IGNORECASE | re.DOTALL)
     if mexp:
         block = mexp.group(2).strip()
         lines = [l.strip(" -•\t") for l in block.splitlines() if l.strip()]
-        # take up to 5 lines as simple entries
+        
         for ln in lines[:6]:
-            # try to split "Title at Company (dates)" pattern
             mm = re.match(r'(?P<title>.+?)\s+at\s+(?P<company>.+?)(?:\s+\(|$)', ln, flags=re.IGNORECASE)
             if mm:
                 work_experience.append({"title": mm.group("title").strip(), "company": mm.group("company").strip(), "description": ln})
@@ -193,16 +164,13 @@ def heuristic_extract_from_resume_text(resume_text: str) -> dict:
         block = medit.group(2).strip()
         lines = [l.strip() for l in block.splitlines() if l.strip()]
         for ln in lines[:5]:
-            # try parse "Degree, Institution, Year"
             parts = [p.strip() for p in re.split(r',|-', ln) if p.strip()]
             education.append({"degree": parts[0] if parts else ln, "institution": parts[1] if len(parts)>1 else "", "year": parts[-1] if parts and re.search(r'\d{4}', parts[-1]) else ""})
 
     summary = None
-    # first paragraph after name might be summary
     lines = [l.strip() for l in rt.splitlines() if l.strip()]
     if len(lines) > 1:
         summary = lines[1]
-    # Assemble result
     result = {
         "name": name,
         "email": email,
@@ -215,10 +183,8 @@ def heuristic_extract_from_resume_text(resume_text: str) -> dict:
     }
     return result
 
-# ---------- Analysis fallback (simple heuristics) ----------
 
 def heuristic_analyze(structured: dict) -> dict:
-    # Basic scoring: start with 4, add points for signals
     score = 4
     skills = structured.get("core_skills") or []
     exp = structured.get("work_experience") or []
@@ -238,14 +204,12 @@ def heuristic_analyze(structured: dict) -> dict:
 
     score = max(1, min(10, score))
 
-    # Improvement areas
     improvements = []
     if not structured.get("email") or not structured.get("phone"):
         improvements.append("Add clear contact information (email & phone) at the top.")
     if len(exp) == 0:
         improvements.append("Add at least one work experience entry with dates and measurable results.")
     else:
-        # check for metrics in descriptions
         has_metric = any(re.search(r'\d+%', (we.get("description") or "")) or re.search(r'\d+', (we.get("description") or "")) for we in exp)
         if not has_metric:
             improvements.append("Quantify achievements in work experience (use numbers/metrics).")
@@ -254,7 +218,6 @@ def heuristic_analyze(structured: dict) -> dict:
     if not improvements:
         improvements.append("Resume is fine; consider formatting and concise bullets.")
 
-    # Upskill suggestions (sample)
     suggestions = []
     needed = ["Docker", "SQL", "AWS", "TypeScript", "Git"]
     present = [s.lower() for s in skills]
@@ -268,7 +231,6 @@ def heuristic_analyze(structured: dict) -> dict:
         "upskill_suggestions": suggestions
     }
 
-# ---------- Main API functions used by your FastAPI app ----------
 
 EXTRACTION_PROMPT = """
 You are an expert HR recruiter.
@@ -312,14 +274,12 @@ Resume JSON:
 
 
 def extract_structured_data(resume_text: str) -> dict:
-    # Try LLM first; if it fails or returns non-JSON, fallback to heuristic extraction
     try:
         raw = call_gemini(EXTRACTION_PROMPT.format(resume_text=resume_text))
         debug_print("=== GEMINI RAW EXTRACTION OUTPUT ===")
         debug_print(raw)
-        # Try multiple parsing strategies
         parsed = try_json_loads(raw)
-        parsed["_llm_raw"] = raw  # include raw LLM output for debugging
+        parsed["_llm_raw"] = raw  
         parsed["_source"] = "llm"
         return parsed
     except Exception as e:
@@ -330,7 +290,6 @@ def extract_structured_data(resume_text: str) -> dict:
         return heur
 
 def analyze_resume(structured_json: dict) -> dict:
-    # Try LLM analysis; fallback to heuristic analyzer if failing
     try:
         raw = call_gemini(ANALYSIS_PROMPT.format(resume_json=json.dumps(structured_json)))
         debug_print("=== GEMINI RAW ANALYSIS OUTPUT ===")

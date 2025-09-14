@@ -10,7 +10,7 @@ build/
 
 # Env
 .env
-backend/.env
+backend/.env.example
 frontend/.env
 
 # Misc

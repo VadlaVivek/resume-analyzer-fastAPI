@@ -15,10 +15,10 @@ app = FastAPI(title="DeepKlarity Resume Analyzer")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # or ["*"] for all
+    allow_origins=["http://localhost:3000"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
 @app.on_event("startup")
@@ -35,15 +35,13 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     return "\n".join(text_parts)
 
 def quick_extract_contact_info(text: str):
-    # Very simple regex helpers to fill name/email/phone if possible
     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
     phone_match = re.search(r'(\+?\d{1,3}[-\s]?)?(\(?\d{2,4}\)?[-\s]?)?\d{3,4}[-\s]?\d{3,4}', text)
-    # For name we attempt to use first line heuristics
+
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     name = None
     if lines:
         candidate = lines[0]
-        # If first line contains an email, skip
         if not re.search(r'@', candidate) and len(candidate.split()) <= 4:
             name = candidate
     email = email_match.group(0) if email_match else None

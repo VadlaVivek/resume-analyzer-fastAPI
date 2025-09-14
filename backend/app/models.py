@@ -9,5 +9,5 @@ class Resume(SQLModel, table=True):
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    extracted_data: Optional[str] = None   # JSON stored as text
-    llm_analysis: Optional[str] = None     # JSON stored as text
+    extracted_data: Optional[str] = None   
+    llm_analysis: Optional[str] = None     
